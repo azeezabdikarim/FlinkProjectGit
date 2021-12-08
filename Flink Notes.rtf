@@ -1,0 +1,32 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2580
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica-Bold;\f1\fswiss\fcharset0 Helvetica;\f2\fnil\fcharset0 Menlo-Regular;
+\f3\fnil\fcharset0 Menlo-Bold;}
+{\colortbl;\red255\green255\blue255;\red246\green247\blue249;\red0\green0\blue0;\red210\green0\blue53;
+}
+{\*\expandedcolortbl;;\cssrgb\c97255\c97647\c98039;\cssrgb\c0\c0\c0;\cssrgb\c86667\c6667\c26667;
+}
+\margl1440\margr1440\vieww11720\viewh8480\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\b\fs24 \cf0 Start Flink Cluster
+\f1\b0 \
+/usr/local/Cellar/apache-flink/1.14.0/libexec/bin/start-cluster.sh\
+\
+
+\f0\b Create Mavin Project
+\f1\b0 \
+https://nightlies.apache.org/flink/flink-docs-release-1.13/docs/dev/datastream/project-configuration/\
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs24\fsmilli12250 \cf0 \cb2 \expnd0\expndtw0\kerning0
+mvn archetype:generate                \cf4 \\\
+\cf0   -DarchetypeGroupId
+\f3\b =
+\f2\b0 org.apache.flink   \cf4 \\\
+\cf0   -DarchetypeArtifactId
+\f3\b =
+\f2\b0 flink-quickstart-java \cf4 \\\
+\cf0   -DarchetypeVersion
+\f3\b =
+\f2\b0 1.13.3\
+jenfefj}
