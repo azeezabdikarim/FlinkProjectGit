@@ -18,11 +18,7 @@
 
 package VehicleTelematics;
 
-import org.apache.flink.api.common.functions.FilterFunction;
-import org.apache.flink.api.java.tuple.Tuple;
-import org.apache.flink.api.java.tuple.Tuple6;
-import org.apache.flink.api.java.tuple.Tuple7;
-import org.apache.flink.api.java.tuple.Tuple8;
+import org.apache.flink.api.java.tuple.*;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
@@ -30,8 +26,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
 import org.apache.flink.streaming.api.windowing.windows.GlobalWindow;
-import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
-import org.apache.flink.streaming.api.windowing.windows.Window;
 import org.apache.flink.util.Collector;
 
 /**
@@ -77,7 +71,9 @@ public class StreamingJob {
 
 		KeyedStream<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>, Tuple> vidKeyStream = streamTuple.keyBy(1);
 
-		//Max Speed
+		/////////////////
+		//  Max Speed //
+		///////////////
 		SingleOutputStreamOperator<Tuple6<Integer, Long, Integer, Integer, Integer, Integer>> maxSpeed = vidKeyStream.max(2).filter(new FilterFunction<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>>() {
 			@Override
 			public boolean filter(Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> in) throws Exception {
@@ -103,33 +99,38 @@ public class StreamingJob {
 
 		maxSpeed.writeAsCsv("SpeedRadar.csv");
 
-
-		SingleOutputStreamOperator<Tuple7<Integer, Integer, Long, Integer, Integer, Integer, Integer>> stoppedCars = vidKeyStream.countWindow(4,1).process(new ProcessWindowFunction<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>, Tuple7<Integer, Integer, Long, Integer, Integer, Integer, Integer>, Integer, GlobalWindow>() {
+		/////////////////
+		//  Stopped Car //
+		///////////////
+		SingleOutputStreamOperator<Tuple7<Integer, Integer, Long, Integer, Integer, Integer, Integer>> stoppedCars = vidKeyStream.countWindow(4,1).process(new ProcessWindowFunction<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>, Tuple7<Integer, Integer, Long, Integer, Integer, Integer, Integer>, Tuple, GlobalWindow>() {
 			@Override
-			public void process(Integer key, Context context, Iterable<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>> input, Collector<Tuple7<Integer, Integer, Long, Integer, Integer, Integer, Integer>> out) throws Exception {
+			public void process(Tuple key, Context context, Iterable<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>> input, Collector<Tuple7<Integer, Integer, Long, Integer, Integer, Integer, Integer>> out) throws Exception {
 				int count = 0;
 				int last_position = -1;
-				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> first_seg;
-				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> last_seg;
+				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> first_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt(""),Integer.parseInt("0"));;
+				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> last_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt(""),Integer.parseInt("0"));;
+
 				for (Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> in: input) {
 					if (count == 0) {
-						first_seg = in;
+						// For the first step of processing the window, set the starting position to 'last_position' and starting tuple to 'first_segment'
+						first_segment = in;
 						last_position = in.f7;
 						count++;
 					} else if (last_position == in.f7) {
+						// As you iterate through the window, check that the current tuple's position is the same as the 'last_position'
+						// If this is the case, then the car has not moved
 						last_position = in.f7;
-						count++;
+						count++; //increment the counter keeping track of how long the same position has been maintaned
 					}
-					last_seg = in;
+					last_segment = in;
 				}
-				if (count == 4) {
-					out.collect(new Tuple7<>(first_seg.f0, last_seg.f0, first_seg.f1, first_seg.f3, first_seg.f6, first_seg.f5, first_seg.f7));
+				if (count == 4) { //if the counter reaches 4, then the car has been in the same postion for 4 time steps, triggering a recorded event
+					out.collect(new Tuple7<>(first_segment.f0, last_segment.f0, first_segment.f1, first_segment.f3, first_segment.f6, first_segment.f5, first_segment.f7));
 				}
 			}
 		});
 		stoppedCars.writeAsCsv("AccidentReporter.csv");
 
-		SingleOutputStreamOperator<Tuple7<Integer, Integer, Long, Integer, Integer, Integer, Integer>> stoppedCars = vidKeyStream.countWindow(4,1).process(new MyProcessWindowFunction());
 
 
 
@@ -157,4 +158,3 @@ public class StreamingJob {
 		env.execute("Flink Streaming Java API Skeleton");
 	}
 }
-
