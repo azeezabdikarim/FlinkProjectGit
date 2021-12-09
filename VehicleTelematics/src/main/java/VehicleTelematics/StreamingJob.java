@@ -20,15 +20,23 @@ package VehicleTelematics;
 
 import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.java.tuple.*;
+import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.streaming.api.functions.timestamps.AscendingTimestampExtractor;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
+import org.apache.flink.streaming.api.windowing.assigners.EventTimeSessionWindows;
 import org.apache.flink.streaming.api.windowing.assigners.GlobalWindows;
+import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.windows.GlobalWindow;
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
+
+import java.util.ArrayList;
+import java.util.LinkedList;
 
 /**
  * Skeleton for a Flink Streaming Job.
@@ -79,7 +87,7 @@ public class StreamingJob {
 		SingleOutputStreamOperator<Tuple6<Integer, Long, Integer, Integer, Integer, Integer>> maxSpeed = vidKeyStream.max(2).filter(new FilterFunction<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>>() {
 			@Override
 			public boolean filter(Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> in) throws Exception {
-				if (in.f2 > 60) {
+				if (in.f2 > 90) {
 					return true;
 				} else {
 					return false;
@@ -105,6 +113,8 @@ public class StreamingJob {
 		// Average Speed Seg 52-56  //
 		/////////////////////////////
 		// return format: Time1, Time2, VID, XWay, Dir, AvgSpd
+		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+
 		SingleOutputStreamOperator<Tuple6<Integer, Integer, Long, Integer, Integer, Double>> avgSpeed = vidKeyStream.filter(new FilterFunction<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>>() {
 			@Override
 			public boolean filter(Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> in) throws Exception {
@@ -114,23 +124,29 @@ public class StreamingJob {
 					return false;
 				}
 			}
-		}).keyBy(5)
-				//  54 54 55 52 53 55 ----- 52 55
-				.window(GlobalWindows.create())
-				.process(new ProcessWindowFunction<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>, Tuple6<Integer, Integer, Long, Integer, Integer, Double>, Tuple, GlobalWindow>() {
+		}).assignTimestampsAndWatermarks(new AscendingTimestampExtractor<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>>(){
+			@Override
+			public long extractAscendingTimestamp(Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> element) {
+				return element.f0;
+			}
+		})
+				.keyBy(1)
+				.window(EventTimeSessionWindows.withGap(Time.seconds(31)))
+				.process(new ProcessWindowFunction<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>, Tuple6<Integer, Integer, Long, Integer, Integer, Double>, Tuple, TimeWindow>() {
 			@Override
 			public void process(Tuple key, Context context, Iterable<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>> input, Collector<Tuple6<Integer, Integer, Long, Integer, Integer, Double>> out) throws Exception {
 				int count = 0;
-				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> first_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt(""),Integer.parseInt("0"));;
-				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> last_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt(""),Integer.parseInt("0"));;
+				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> first_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"));
+				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> last_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"));
 				//Segment is f6 Position is f7 Direction is f5
+				ArrayList<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>> journey = new ArrayList<>();
 				for (Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> in: input) {
-					System.out.println((in));
+					journey.add(in);
 					if (count == 0) {
 						first_segment = in;
 						last_segment = in;
 					}
-					if (in.f5 == 1) {
+					if (in.f5 == 0) {
 						if((in.f6 <= first_segment.f6) && (in.f7 < first_segment.f7)) {
 							first_segment = in;
 						}
@@ -147,15 +163,17 @@ public class StreamingJob {
 					}
 					count++;
 				}
-				System.out.println(first_segment + "\t" + last_segment);
 				boolean finished_segment = ((first_segment.f6 == 52) && (last_segment.f6 == 56) || (first_segment.f6 == 56) && (last_segment.f6 == 52));
+
 				if(finished_segment) {
 					int meters_driven = Math.abs((first_segment.f7 - last_segment.f7));
 					double seconds_driven = count * 30.0;
 					// 1 m/s is equivalent to 2.236936 mph
-					double avg_speed_mph = (meters_driven / seconds_driven) * seconds_driven;
-					Tuple6<Integer, Integer, Long, Integer, Integer, Double> output = new Tuple6<>(first_segment.f0, last_segment.f0, first_segment.f1, first_segment.f3, first_segment.f5, seconds_driven);
-					System.out.println(output);
+					double avg_speed_mph = (meters_driven / seconds_driven) * 2.236936;
+					Tuple6<Integer, Integer, Long, Integer, Integer, Double> output = new Tuple6<>(first_segment.f0, last_segment.f0, first_segment.f1, first_segment.f3, first_segment.f5, avg_speed_mph);
+					if (avg_speed_mph > 60) {
+						out.collect(output);
+					}
 				}
 			}
 		});
