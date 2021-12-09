@@ -18,6 +18,7 @@
 
 package VehicleTelematics;
 
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.java.tuple.*;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.KeyedStream;
@@ -25,6 +26,7 @@ import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
+import org.apache.flink.streaming.api.windowing.assigners.GlobalWindows;
 import org.apache.flink.streaming.api.windowing.windows.GlobalWindow;
 import org.apache.flink.util.Collector;
 
@@ -97,18 +99,80 @@ public class StreamingJob {
 			}
 		});
 
-		maxSpeed.writeAsCsv("SpeedRadar.csv");
+		maxSpeed.writeAsCsv("Output/SpeedRadar.csv");
 
-		/////////////////
+		///////////////////////////////
+		// Average Speed Seg 52-56  //
+		/////////////////////////////
+		// return format: Time1, Time2, VID, XWay, Dir, AvgSpd
+		SingleOutputStreamOperator<Tuple6<Integer, Integer, Long, Integer, Integer, Double>> avgSpeed = vidKeyStream.filter(new FilterFunction<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>>() {
+			@Override
+			public boolean filter(Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> in) throws Exception {
+				if ((in.f6 >= 52) && (in.f6 <= 56)) {
+					return true;
+				} else {
+					return false;
+				}
+			}
+		}).keyBy(5)
+				//  54 54 55 52 53 55 ----- 52 55
+				.window(GlobalWindows.create())
+				.process(new ProcessWindowFunction<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>, Tuple6<Integer, Integer, Long, Integer, Integer, Double>, Tuple, GlobalWindow>() {
+			@Override
+			public void process(Tuple key, Context context, Iterable<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>> input, Collector<Tuple6<Integer, Integer, Long, Integer, Integer, Double>> out) throws Exception {
+				int count = 0;
+				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> first_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt(""),Integer.parseInt("0"));;
+				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> last_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt(""),Integer.parseInt("0"));;
+				//Segment is f6 Position is f7 Direction is f5
+				for (Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> in: input) {
+					System.out.println((in));
+					if (count == 0) {
+						first_segment = in;
+						last_segment = in;
+					}
+					if (in.f5 == 1) {
+						if((in.f6 <= first_segment.f6) && (in.f7 < first_segment.f7)) {
+							first_segment = in;
+						}
+						else if((in.f6 >= last_segment.f6) && (in.f7 > last_segment.f7)) {
+							last_segment = in;
+						}
+					} else {
+						if((in.f6 >= first_segment.f6) && (in.f7 > first_segment.f7)) {
+							first_segment = in;
+						}
+						else if((in.f6 <= last_segment.f6) && (in.f7 < last_segment.f7)) {
+							last_segment = in;
+						}
+					}
+					count++;
+				}
+				System.out.println(first_segment + "\t" + last_segment);
+				boolean finished_segment = ((first_segment.f6 == 52) && (last_segment.f6 == 56) || (first_segment.f6 == 56) && (last_segment.f6 == 52));
+				if(finished_segment) {
+					int meters_driven = Math.abs((first_segment.f7 - last_segment.f7));
+					double seconds_driven = count * 30.0;
+					// 1 m/s is equivalent to 2.236936 mph
+					double avg_speed_mph = (meters_driven / seconds_driven) * seconds_driven;
+					Tuple6<Integer, Integer, Long, Integer, Integer, Double> output = new Tuple6<>(first_segment.f0, last_segment.f0, first_segment.f1, first_segment.f3, first_segment.f5, seconds_driven);
+					System.out.println(output);
+				}
+			}
+		});
+
+		avgSpeed.writeAsCsv("Output/AverageSpeedControl.csv");
+
+
+		///////////////////
 		//  Stopped Car //
-		///////////////
+		/////////////////
 		SingleOutputStreamOperator<Tuple7<Integer, Integer, Long, Integer, Integer, Integer, Integer>> stoppedCars = vidKeyStream.countWindow(4,1).process(new ProcessWindowFunction<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>, Tuple7<Integer, Integer, Long, Integer, Integer, Integer, Integer>, Tuple, GlobalWindow>() {
 			@Override
 			public void process(Tuple key, Context context, Iterable<Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer>> input, Collector<Tuple7<Integer, Integer, Long, Integer, Integer, Integer, Integer>> out) throws Exception {
 				int count = 0;
 				int last_position = -1;
-				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> first_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt(""),Integer.parseInt("0"));;
-				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> last_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt(""),Integer.parseInt("0"));;
+				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> first_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"));
+				Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> last_segment = new Tuple8<>(Integer.parseInt("0"),Long.parseLong("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"),Integer.parseInt("0"));
 
 				for (Tuple8<Integer, Long, Integer, Integer, Integer, Integer, Integer, Integer> in: input) {
 					if (count == 0) {
@@ -129,7 +193,9 @@ public class StreamingJob {
 				}
 			}
 		});
-		stoppedCars.writeAsCsv("AccidentReporter.csv");
+		stoppedCars.writeAsCsv("Output/AccidentReporter.csv");
+
+
 
 
 
